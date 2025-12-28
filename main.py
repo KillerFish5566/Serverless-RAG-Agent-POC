@@ -7,7 +7,6 @@ from dotenv import load_dotenv
 
 # --- 0. 設定與警告過濾 ---
 warnings.filterwarnings("ignore", category=UserWarning, module="linebot")
-# ddgs 的警告已經透過換套件解決了，所以這裡不需要再濾 duckduckgo
 
 # 引入新版搜尋套件
 from duckduckgo_search import DDGS
@@ -165,19 +164,45 @@ def generate_summary(news_list, target_date):
         return None
 
 def send_line_push(message):
-    logger.info("🚀 正在發送 LINE 訊息...")
-    configuration = Configuration(access_token=LINE_CHANNEL_ACCESS_TOKEN)
+    logger.info("🚀 正在發送 LINE 訊息 (使用 Requests 直連模式)...")
+
+    # 直接在函式內引入
     try:
-        with ApiClient(configuration) as api_client:
-            line_bot_api = MessagingApi(api_client)
-            push_message_request = PushMessageRequest(
-                to=LINE_USER_ID,
-                messages=[TextMessage(text=message)]
-            )
-            line_bot_api.push_message(push_message_request)
+        import requests
+        import json
+    except ImportError:
+        logger.error("❌ 缺少 requests 套件！請執行 pip install requests")
+        return
+
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}'
+    }
+
+    payload = {
+        'to': LINE_USER_ID,
+        'messages': [{'type': 'text', 'text': message}]
+    }
+
+    target_url = 'https://api.line.me/v2/bot/message/push'
+
+    try:
+        # 設定 30 秒逾時
+        logger.info(f"📡 正在連線至: {target_url}")
+        response = requests.post(
+            target_url,
+            headers=headers,
+            json=payload,
+            timeout=30
+        )
+
+        if response.status_code == 200:
             logger.info("✅ LINE 訊息發送成功！")
+        else:
+            logger.error(f"❌ LINE 發送失敗: {response.status_code} - {response.text}")
+
     except Exception as e:
-        logger.error(f"❌ LINE 發送失敗: {e}")
+        logger.error(f"❌ LINE 發送發生錯誤: {e}")
 
 def main():
     today = get_target_date()
