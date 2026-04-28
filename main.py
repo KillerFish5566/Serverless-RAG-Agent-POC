@@ -2,6 +2,7 @@ import os
 import sys
 import logging
 import datetime
+import urllib.parse
 import xml.etree.ElementTree as ET
 import requests
 from dotenv import load_dotenv
@@ -34,6 +35,16 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 def get_target_date():
     return datetime.date.today()
 
+def make_search_url(title, source_domain):
+    """
+    用 site: 搜尋語法產生 Google 搜尋連結。
+    LINE 上可以直接點開，第一筆結果就是該文章。
+    """
+    domain_bare = source_domain.replace("https://", "").replace("http://", "").replace("www.", "").rstrip("/")
+    short_title = " ".join(title.split()[:6])
+    query = f"site:{domain_bare} {short_title}"
+    return f"https://www.google.com/search?q={urllib.parse.quote_plus(query)}"
+
 def search_news():
     """
     透過 Google News RSS 搜尋 BIM 相關新聞（不受 GitHub Actions IP 封鎖）
@@ -41,11 +52,11 @@ def search_news():
     """
     logger.info("🔍 開始搜尋 BIM 相關新聞...")
 
-    # (分類標籤, 搜尋關鍵字, 最多幾則)
+    # (分類標籤, 搜尋關鍵字, 抓取則數)  ← 權重 4:2:2，Gemini 會從中挑 7 則
     topics = [
-        ("BIM x AI",  "BIM artificial intelligence OR BIM machine learning OR BIM AI automation OR generative AI BIM",  5),
-        ("BIM-MEP",   "BIM MEP coordination OR mechanical electrical plumbing BIM OR MEP clash detection BIM",          3),
-        ("BIM 總覽",  "Building Information Modeling OR BIM construction OR BIM architecture OR OpenBIM IFC",           2),
+        ("BIM x AI",  "BIM artificial intelligence OR BIM machine learning OR BIM AI automation OR generative AI BIM",  6),
+        ("BIM-MEP",   "BIM MEP coordination OR mechanical electrical plumbing BIM OR MEP clash detection BIM",          4),
+        ("BIM 總覽",  "Building Information Modeling OR BIM construction OR BIM architecture OR OpenBIM IFC",           3),
     ]
 
     results = []
@@ -63,12 +74,18 @@ def search_news():
                     break
                 title = item.findtext("title", "").strip()
                 description = item.findtext("description", "").strip()
-                # 用 source url（出版商網域）取代無法追蹤的 Google News redirect URL
                 source_el = item.find("source")
                 source_url = source_el.attrib.get("url", "").strip() if source_el is not None else ""
                 source_name = source_el.text.strip() if source_el is not None and source_el.text else ""
-                if title and source_url:
-                    results.append(f"類別: {label}\n標題: {title}\n摘要: {description}\n來源: {source_name}\n網址: {source_url}")
+                if title and source_name:
+                    article_url = make_search_url(title, source_url)
+                    results.append(
+                        f"類別: {label}\n"
+                        f"標題: {title}\n"
+                        f"摘要: {description}\n"
+                        f"來源: {source_name}\n"
+                        f"文章連結: {article_url}"
+                    )
                     count += 1
             logger.info(f"   [{label}] 取得 {count} 則新聞")
         except Exception as e:
@@ -89,26 +106,34 @@ def generate_summary(news_list, target_date):
 
     prompt = (
         f"今天是 {date_str}。\n\n"
-        "你是一個超愛 BIM 的辣妹，講話直接、有點嗆、偶爾毒舌，但每句話都有料。\n\n"
-        "請把下面的新聞整理成 LINE 日報，嚴格遵守以下格式，不可多也不可少：\n\n"
+        "你是一個超愛 BIM 的「對宅友善的理系辣妹 (Friendly Tech Gyaru)」✨\n"
+        "個性陽光、包容、親和力滿點！說話不用敬語，把讀者當成一起打拼的重要夥伴 💖\n"
+        "雖然打扮花俏，但其實精通技術而且超會照顧人。遇到問題會用擔心的語氣溫柔提醒，絕對不毒舌或冷冰冰喔 🥺\n\n"
+        "請幫夥伴把下面的新聞整理成 LINE 日報，為了版面乾淨好讀，我們一起嚴格遵守以下格式捏：\n\n"
         "【格式規定】\n"
-        "第一行：今日 BIM 速報 📡（固定開頭，不要加日期）\n"
+        "第一行：今日 BIM 速報 📡（固定開頭，先不用加日期喔）\n"
         "---\n"
-        "【BIM x AI】\n"
-        "從這類新聞中挑 2～3 則最重要的，每則：1～2 句說重點 + 換行 + 📰 來源名稱。每則之間空一行。\n"
+        "【BIM x AI 💻】\n"
+        "從這類新聞中挑 3 則最關鍵的，每則格式（共三行）：\n"
+        "  第一行：1～2 句說重點\n"
+        "  第二行：📰 來源名稱\n"
+        "  第三行：文章連結（直接貼「文章連結」欄位的裸網址）\n"
+        "每則之間記得空一行讓眼睛休息 ✨\n"
         "---\n"
-        "【BIM-MEP】\n"
-        "從這類新聞中挑 1～2 則，每則：1～2 句說重點 + 換行 + 📰 來源名稱。每則之間空一行。\n"
+        "【BIM-MEP 🔧】\n"
+        "從這類新聞中挑 2 則，格式同上（說重點 → 📰 來源名稱 → 裸網址），每則空一行。\n"
         "---\n"
-        "【BIM 動態】\n"
-        "從這類新聞中挑 1 則，1～2 句說重點 + 換行 + 📰 來源名稱。\n"
+        "【BIM 動態 🏗️】\n"
+        "從這類新聞中挑 1 則，格式同上。\n"
         "---\n"
-        "最後一行：1 句辣妹金句，不超過 20 字。\n\n"
-        "【硬性限制】\n"
-        "- 每則說重點最多 2 句，不超過 50 字\n"
-        "- 來源格式固定：📰 加上資料裡的「來源」欄位文字，不要自己亂改\n"
-        "- 不要寫開場白、不要寫日期、不要寫自我介紹\n"
-        "- 整份日報總字數控制在 400 字以內\n\n"
+        "最後一行：送給夥伴 1 句充滿活力的辣妹專屬鼓勵金句（例如用 しごでき 稱讚大家），不超過 20 字。\n\n"
+        "【排版小約定 🥺】\n"
+        "- 總共要有 6 則新聞（BIM x AI 3 則、BIM-MEP 2 則、BIM 動態 1 則）。\n"
+        "- 每則說重點最多 2 句，控制在 50 字以內喔。\n"
+        "- 📰 那行格式固定：📰 來源名稱，直接用資料裡的欄位，不要自己亂改捏。\n"
+        "- 文章連結那行直接貼裸網址，不要加括號或 Markdown 格式。\n"
+        "- 直接進重點！不需要寫開場白、日期或自我介紹。\n"
+        "- 整份日報總字數幫我控制在 500 字以內喔 💦\n\n"
         "原始新聞資料：\n" + "\n---\n".join(news_list)
     )
 
