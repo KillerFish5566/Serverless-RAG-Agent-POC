@@ -42,18 +42,18 @@ It runs entirely on **GitHub Actions** at 06:30 AM (Taiwan time) every day, scra
 GitHub Actions (daily cron: UTC 22:30 = TW 06:30)
         │
         ▼
-Google News RSS ──► scrape BIM × AI (5)  ┐
-                    BIM-MEP        (3)  ├─► Gemini 2.0 Flash ──► LINE Push
-                    BIM General    (2)  ┘
+Google News RSS ──► scrape BIM × AI (6)  ┐
+                    BIM-MEP        (4)  ├─► Gemini 2.0 Flash ──► LINE Push
+                    BIM General    (3)  ┘   (selects top 6 for digest)
 ```
 
 ### 📰 News Coverage & Weights
 
-| Category | Weight | Max Articles | Focus |
-| :--- | :---: | :---: | :--- |
-| **BIM × AI** | ⭐⭐⭐ | 5 | AI/ML applied to BIM, generative AI in AEC |
-| **BIM-MEP** | ⭐⭐ | 3 | MEP coordination, clash detection, M&E BIM |
-| **BIM General** | ⭐ | 2 | OpenBIM, IFC, general BIM adoption |
+| Category | Weight | Fetched | Displayed | Focus |
+| :--- | :---: | :---: | :---: | :--- |
+| **BIM × AI** | ⭐⭐⭐ | 6 | 3 | AI/ML applied to BIM, generative AI in AEC |
+| **BIM-MEP** | ⭐⭐ | 4 | 2 | MEP coordination, clash detection, M&E BIM |
+| **BIM General** | ⭐ | 3 | 1 | OpenBIM, IFC, general BIM adoption |
 
 ---
 
@@ -101,6 +101,13 @@ Go to **Actions → Daily BIM Bot → Run workflow**.
 ---
 
 ## 📋 Changelog
+
+### v2.1.0 — 2026-04-28
+- Reduced daily digest from 7 articles to 6 (BIM × AI: 3, BIM-MEP: 2, BIM General: 1)
+- Increased RSS fetch pool to give Gemini more candidates to choose from: BIM × AI (6), BIM-MEP (4), BIM General (3)
+- Simplified source line in digest: removed article title, now shows `📰 Source Name` only
+- Switched article links from long Google News redirect URLs to Google `site:` search URLs — shorter, always clickable in LINE, and reliably surface the correct article
+- Removed Markdown link formatting from output (LINE does not render Markdown; bare URLs auto-become clickable)
 
 ### v2.0.0 — 2026-04-28
 - **Breaking:** Replaced DuckDuckGo search with Google News RSS (fixes silent failures on GitHub Actions runners where DuckDuckGo IPs are blocked)
