@@ -34,6 +34,14 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 def get_target_date():
     return datetime.date.today()
 
+def resolve_url(google_news_url):
+    """追蹤 Google News redirect，回傳真實文章網址。"""
+    try:
+        r = requests.head(google_news_url, allow_redirects=True, timeout=8, headers={"User-Agent": "Mozilla/5.0"})
+        return r.url
+    except Exception:
+        return google_news_url
+
 def search_news():
     """
     透過 Google News RSS 搜尋 BIM 相關新聞（不受 GitHub Actions IP 封鎖）
@@ -51,9 +59,9 @@ def search_news():
     results = []
 
     for label, query, max_count in topics:
-        url = f"https://news.google.com/rss/search?q={requests.utils.quote(query)}&hl=en-US&gl=US&ceid=US:en"
+        rss_url = f"https://news.google.com/rss/search?q={requests.utils.quote(query)}&hl=en-US&gl=US&ceid=US:en"
         try:
-            resp = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+            resp = requests.get(rss_url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
             resp.raise_for_status()
             root = ET.fromstring(resp.content)
             items = root.findall(".//item")
@@ -65,7 +73,8 @@ def search_news():
                 link = item.findtext("link", "").strip()
                 description = item.findtext("description", "").strip()
                 if title and link:
-                    results.append(f"類別: {label}\n標題: {title}\n摘要: {description}\n連結: {link}")
+                    real_url = resolve_url(link)
+                    results.append(f"類別: {label}\n標題: {title}\n摘要: {description}\n連結: {real_url}")
                     count += 1
             logger.info(f"   [{label}] 取得 {count} 則新聞")
         except Exception as e:
@@ -86,17 +95,26 @@ def generate_summary(news_list, target_date):
 
     prompt = (
         f"今天是 {date_str}。\n\n"
-        "你現在是一個超愛 BIM 的辣妹，每天都在追 BIM 業界的最新八卦跟動向。\n"
-        "你對 BIM 結合 AI 的應用特別感興趣，講話熱情、直接、有點嗆，但說的東西都是真的、有料的。\n"
-        "你不會用那種一看就是 AI 寫的制式格式，你就是個愛說真話的業界妹子。\n\n"
-        "下面是今天收集到的 BIM 相關新聞，請幫我整理成一份日報，規則如下：\n\n"
-        "1. BIM x AI 的消息排最前面、給最多篇幅，這塊最重要！\n"
-        "2. BIM-MEP 的消息排第二。\n"
-        "3. 一般 BIM 動態排最後。\n"
-        "4. 每則新聞用這個格式：【分類】然後換行，用自己的話說重點（不要照抄，要有自己的評論跟感受），然後換行放連結。\n"
-        "5. 如果某類真的沒什麼好說的，就一句話帶過，別硬湊字數。\n"
-        "6. 結尾給一句今天你自己對 BIM 業界的心得或感想，要有個性，不要廢話。\n"
-        "7. 整體語氣：熱情、有點毒舌但不失專業、像在跟朋友聊天一樣自然。\n\n"
+        "你是一個超愛 BIM 的辣妹，講話直接、有點嗆、偶爾毒舌，但每句話都有料。\n\n"
+        "請把下面的新聞整理成 LINE 日報，嚴格遵守以下格式，不可多也不可少：\n\n"
+        "【格式規定】\n"
+        "第一行：今日 BIM 速報 📡（固定開頭，不要加日期）\n"
+        "---\n"
+        "【BIM x AI】\n"
+        "從這類新聞中挑 2～3 則最重要的，每則：1 句話說重點 + 1 行網址。每則之間空一行。\n"
+        "---\n"
+        "【BIM-MEP】\n"
+        "從這類新聞中挑 1～2 則，每則：1 句話說重點 + 1 行網址。每則之間空一行。\n"
+        "---\n"
+        "【BIM 動態】\n"
+        "從這類新聞中挑 1 則，1 句話說重點 + 1 行網址。\n"
+        "---\n"
+        "最後一行：1 句辣妹風格的今日金句，不超過 20 字。\n\n"
+        "【硬性限制】\n"
+        "- 每則新聞說重點只能寫 1～2 句話，不準超過 50 字\n"
+        "- 網址直接貼，不要加任何說明文字\n"
+        "- 不要寫開場白、不要寫日期、不要寫自我介紹\n"
+        "- 整份日報總字數控制在 400 字以內\n\n"
         "原始新聞資料：\n" + "\n---\n".join(news_list)
     )
 
