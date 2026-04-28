@@ -34,14 +34,6 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 def get_target_date():
     return datetime.date.today()
 
-def resolve_url(google_news_url):
-    """追蹤 Google News redirect，回傳真實文章網址。"""
-    try:
-        r = requests.head(google_news_url, allow_redirects=True, timeout=8, headers={"User-Agent": "Mozilla/5.0"})
-        return r.url
-    except Exception:
-        return google_news_url
-
 def search_news():
     """
     透過 Google News RSS 搜尋 BIM 相關新聞（不受 GitHub Actions IP 封鎖）
@@ -70,11 +62,13 @@ def search_news():
                 if count >= max_count:
                     break
                 title = item.findtext("title", "").strip()
-                link = item.findtext("link", "").strip()
                 description = item.findtext("description", "").strip()
-                if title and link:
-                    real_url = resolve_url(link)
-                    results.append(f"類別: {label}\n標題: {title}\n摘要: {description}\n連結: {real_url}")
+                # 用 source url（出版商網域）取代無法追蹤的 Google News redirect URL
+                source_el = item.find("source")
+                source_url = source_el.attrib.get("url", "").strip() if source_el is not None else ""
+                source_name = source_el.text.strip() if source_el is not None and source_el.text else ""
+                if title and source_url:
+                    results.append(f"類別: {label}\n標題: {title}\n摘要: {description}\n來源: {source_name}\n網址: {source_url}")
                     count += 1
             logger.info(f"   [{label}] 取得 {count} 則新聞")
         except Exception as e:
@@ -101,18 +95,18 @@ def generate_summary(news_list, target_date):
         "第一行：今日 BIM 速報 📡（固定開頭，不要加日期）\n"
         "---\n"
         "【BIM x AI】\n"
-        "從這類新聞中挑 2～3 則最重要的，每則：1 句話說重點 + 1 行網址。每則之間空一行。\n"
+        "從這類新聞中挑 2～3 則最重要的，每則：1～2 句說重點 + 換行 + 📰 來源名稱。每則之間空一行。\n"
         "---\n"
         "【BIM-MEP】\n"
-        "從這類新聞中挑 1～2 則，每則：1 句話說重點 + 1 行網址。每則之間空一行。\n"
+        "從這類新聞中挑 1～2 則，每則：1～2 句說重點 + 換行 + 📰 來源名稱。每則之間空一行。\n"
         "---\n"
         "【BIM 動態】\n"
-        "從這類新聞中挑 1 則，1 句話說重點 + 1 行網址。\n"
+        "從這類新聞中挑 1 則，1～2 句說重點 + 換行 + 📰 來源名稱。\n"
         "---\n"
-        "最後一行：1 句辣妹風格的今日金句，不超過 20 字。\n\n"
+        "最後一行：1 句辣妹金句，不超過 20 字。\n\n"
         "【硬性限制】\n"
-        "- 每則新聞說重點只能寫 1～2 句話，不準超過 50 字\n"
-        "- 網址直接貼，不要加任何說明文字\n"
+        "- 每則說重點最多 2 句，不超過 50 字\n"
+        "- 來源格式固定：📰 加上資料裡的「來源」欄位文字，不要自己亂改\n"
         "- 不要寫開場白、不要寫日期、不要寫自我介紹\n"
         "- 整份日報總字數控制在 400 字以內\n\n"
         "原始新聞資料：\n" + "\n---\n".join(news_list)
