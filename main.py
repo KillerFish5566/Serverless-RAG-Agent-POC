@@ -45,14 +45,27 @@ def make_search_url(title, source_domain):
     query = f"site:{domain_bare} {short_title}"
     return f"https://www.google.com/search?q={urllib.parse.quote_plus(query)}"
 
-def search_news():
+def parse_pub_date(pub_date_str):
+    """解析 RSS pubDate 字串，回傳 datetime.date，失敗時回傳 None。"""
+    if not pub_date_str:
+        return None
+    for fmt in ("%a, %d %b %Y %H:%M:%S %z", "%a, %d %b %Y %H:%M:%S GMT"):
+        try:
+            return datetime.datetime.strptime(pub_date_str.strip(), fmt).date()
+        except ValueError:
+            continue
+    return None
+
+def search_news(days: int = 7):
     """
     透過 Google News RSS 搜尋 BIM 相關新聞（不受 GitHub Actions IP 封鎖）
-    權重：BIM-AI(5則) > BIM-MEP(3則) > BIM總體(2則)
+    雙重日期過濾：查詢參數 when:{days}d + pubDate 二次驗證
+    權重：BIM-AI(6則) > BIM-MEP(4則) > BIM總覽(3則)
     """
-    logger.info("🔍 開始搜尋 BIM 相關新聞...")
+    logger.info(f"🔍 開始搜尋 BIM 相關新聞（近 {days} 天）...")
 
-    # (分類標籤, 搜尋關鍵字, 抓取則數)  ← 權重 4:2:2，Gemini 會從中挑 7 則
+    cutoff = datetime.date.today() - datetime.timedelta(days=days)
+
     topics = [
         ("BIM x AI",  "BIM artificial intelligence OR BIM machine learning OR BIM AI automation OR generative AI BIM",  6),
         ("BIM-MEP",   "BIM MEP coordination OR mechanical electrical plumbing BIM OR MEP clash detection BIM",          4),
@@ -62,32 +75,47 @@ def search_news():
     results = []
 
     for label, query, max_count in topics:
-        rss_url = f"https://news.google.com/rss/search?q={requests.utils.quote(query)}&hl=en-US&gl=US&ceid=US:en"
+        # 第一道防線：when:Xd 在 RSS 源頭過濾
+        dated_query = f"{query} when:{days}d"
+        rss_url = f"https://news.google.com/rss/search?q={requests.utils.quote(dated_query)}&hl=en-US&gl=US&ceid=US:en"
         try:
             resp = requests.get(rss_url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
             resp.raise_for_status()
             root = ET.fromstring(resp.content)
             items = root.findall(".//item")
             count = 0
+            skipped = 0
             for item in items:
                 if count >= max_count:
                     break
                 title = item.findtext("title", "").strip()
                 description = item.findtext("description", "").strip()
+                pub_date_str = item.findtext("pubDate", "").strip()
                 source_el = item.find("source")
                 source_url = source_el.attrib.get("url", "").strip() if source_el is not None else ""
                 source_name = source_el.text.strip() if source_el is not None and source_el.text else ""
-                if title and source_name:
-                    article_url = make_search_url(title, source_url)
-                    results.append(
-                        f"類別: {label}\n"
-                        f"標題: {title}\n"
-                        f"摘要: {description}\n"
-                        f"來源: {source_name}\n"
-                        f"文章連結: {article_url}"
-                    )
-                    count += 1
-            logger.info(f"   [{label}] 取得 {count} 則新聞")
+
+                if not title or not source_name:
+                    continue
+
+                # 第二道防線：解析 pubDate，過濾超過 days 天的文章
+                pub_date = parse_pub_date(pub_date_str)
+                if pub_date and pub_date < cutoff:
+                    skipped += 1
+                    logger.debug(f"   [{label}] 跳過舊文章 ({pub_date}): {title[:40]}")
+                    continue
+
+                article_url = make_search_url(title, source_url)
+                results.append(
+                    f"類別: {label}\n"
+                    f"標題: {title}\n"
+                    f"摘要: {description}\n"
+                    f"來源: {source_name}\n"
+                    f"文章連結: {article_url}"
+                )
+                count += 1
+
+            logger.info(f"   [{label}] 取得 {count} 則（過濾掉 {skipped} 則舊文章）")
         except Exception as e:
             logger.warning(f"   [{label}] 搜尋失敗: {e}")
 

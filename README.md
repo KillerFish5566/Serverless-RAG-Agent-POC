@@ -102,6 +102,13 @@ Go to **Actions → Daily BIM Bot → Run workflow**.
 
 ## 📋 Changelog
 
+### v2.2.0 — 2026-04-30
+- Added dual-layer date filtering to prevent stale articles in the digest
+  - Layer 1: `when:7d` appended to all Google News RSS queries (filters at source)
+  - Layer 2: `pubDate` parsing on each RSS item — articles older than 7 days are skipped
+- `search_news()` now accepts a `days` parameter (default: 7) for easy tuning
+- Log output now shows filtered article count per topic (e.g. `取得 5 則（過濾掉 2 則舊文章）`)
+
 ### v2.1.0 — 2026-04-28
 - Reduced daily digest from 7 articles to 6 (BIM × AI: 3, BIM-MEP: 2, BIM General: 1)
 - Increased RSS fetch pool to give Gemini more candidates to choose from: BIM × AI (6), BIM-MEP (4), BIM General (3)
