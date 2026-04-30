@@ -1,134 +1,137 @@
 # BIM Daily Intelligence Bot
 
-![Status](https://img.shields.io/badge/Status-Active-success)
-![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
+![GitHub Actions](https://github.com/KillerFish5566/Serverless-RAG-Agent-POC/actions/workflows/daily_news.yml/badge.svg)
+![Python](https://img.shields.io/badge/Python-3.12%2B-blue)
 ![Gemini](https://img.shields.io/badge/AI-Google_Gemini_2.0-orange)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-> **Enterprise Scenario Simulation:** A Serverless CI/CD pipeline that aggregates BIM industry news daily, summarizes it with an LLM, and delivers it straight to LINE — with a gyaru twist.
-
-## 📖 Executive Summary
-
-This project is a **Proof of Concept (POC)** for a lightweight, serverless **AI-Powered News Digest Bot**, focused on the Building Information Modeling (BIM) domain.
-
-It runs entirely on **GitHub Actions** at 06:30 AM (Taiwan time) every day, scrapes BIM-related news from Google News RSS, generates a personality-driven summary via Google Gemini, and pushes it to LINE.
-
-### 🎯 Value Proposition
-
-- **Zero-Cost Infrastructure** — runs fully on GitHub Actions with no server to maintain
-- **Fault Tolerance** — automatic model fallback handles API rate limits and outages
-- **Domain-Focused** — coverage weighted toward BIM × AI, then BIM-MEP, then general BIM
-- **Personality-Driven Output** — summaries written in a direct, opinionated gyaru tone rather than sterile AI prose
+A serverless bot that collects BIM industry news daily, summarizes it with Google Gemini, and delivers a digest to LINE — automatically, at no infrastructure cost.
 
 ---
 
-## 🏗️ Architecture & Engineering Decisions
+## Features
 
-### 🛠 Tech Stack
+- **Zero-cost infrastructure** — runs entirely on GitHub Actions; no server to manage
+- **Domain-weighted coverage** — prioritizes BIM × AI news, followed by BIM-MEP and general BIM
+- **7-day freshness filter** — dual-layer date check ensures only recent articles are included
+- **Automatic model fallback** — switches to a backup Gemini model if the primary hits rate limits
+- **Failure alerts** — sends a LINE notification if the daily run fails
 
-| Component | Technology | Details |
-| :--- | :--- | :--- |
-| **Core Runtime** | Python | 3.10+ |
-| **AI Model** | Google Gemini | 2.0 Flash (primary), gemini-flash-latest (fallback) |
-| **SDK** | Google GenAI SDK | `google-genai` official Python client |
-| **News Source** | Google News RSS | No API key required; reliable on cloud runners |
-| **Orchestration** | GitHub Actions | Ubuntu-latest, serverless cron job |
-| **Messaging** | LINE Messaging API | RESTful push via `requests` |
-| **Secrets** | GitHub Secrets + dotenv | `python-dotenv` for local dev |
+---
 
-### ⚙️ Data Flow
+## How It Works
 
 ```
-GitHub Actions (daily cron: UTC 22:30 = TW 06:30)
+GitHub Actions (daily cron: UTC 22:30 = Taiwan 06:30)
         │
         ▼
-Google News RSS ──► scrape BIM × AI (6)  ┐
-                    BIM-MEP        (4)  ├─► Gemini 2.0 Flash ──► LINE Push
-                    BIM General    (3)  ┘   (selects top 6 for digest)
+Google News RSS ──► BIM × AI    (fetch 6) ┐
+                    BIM-MEP     (fetch 4) ├─► Gemini 2.0 Flash ──► LINE Push
+                    BIM General (fetch 3) ┘   (selects top 6 for digest)
 ```
 
-### 📰 News Coverage & Weights
+### News Categories
 
-| Category | Weight | Fetched | Displayed | Focus |
-| :--- | :---: | :---: | :---: | :--- |
-| **BIM × AI** | ⭐⭐⭐ | 6 | 3 | AI/ML applied to BIM, generative AI in AEC |
-| **BIM-MEP** | ⭐⭐ | 4 | 2 | MEP coordination, clash detection, M&E BIM |
-| **BIM General** | ⭐ | 3 | 1 | OpenBIM, IFC, general BIM adoption |
+| Category | Fetched | Displayed | Focus |
+| :--- | :---: | :---: | :--- |
+| **BIM × AI** | 6 | 3 | AI/ML applied to BIM, generative AI in AEC |
+| **BIM-MEP** | 4 | 2 | MEP coordination, clash detection, M&E BIM |
+| **BIM General** | 3 | 1 | OpenBIM, IFC, general BIM adoption |
 
 ---
 
-## 🚀 Setup
+## Tech Stack
 
-### 1. Clone & Install
+| Component | Technology |
+| :--- | :--- |
+| Runtime | Python 3.12+ |
+| AI Model | Google Gemini 2.0 Flash (primary), gemini-flash-latest (fallback) |
+| News Source | Google News RSS |
+| Orchestration | GitHub Actions (Ubuntu, serverless cron) |
+| Messaging | LINE Messaging API |
+| Secrets | GitHub Actions Secrets + `python-dotenv` for local dev |
+
+---
+
+## Setup
+
+### 1. Clone & install
 
 ```bash
-git clone <your-repo-url>
-cd <repo-folder>
+git clone https://github.com/KillerFish5566/Serverless-RAG-Agent-POC.git
+cd Serverless-RAG-Agent-POC
 pip install -r requirements.txt
 ```
 
-### 2. Configure Secrets
+### 2. Configure environment variables
 
-Copy `.env` and fill in your keys:
+Copy the template and fill in your credentials:
 
+```bash
+cp .env.example .env
 ```
-GEMINI_API_KEY=          # Google AI Studio: https://aistudio.google.com/app/apikey
-LINE_CHANNEL_ACCESS_TOKEN=   # LINE Developers Console > Messaging API > Channel access token
-LINE_USER_ID=            # Your personal LINE UID (starts with U, 33 chars)
-```
+
+| Variable | Where to get it |
+| :--- | :--- |
+| `GEMINI_API_KEY` | [Google AI Studio](https://aistudio.google.com/app/apikey) |
+| `LINE_CHANNEL_ACCESS_TOKEN` | LINE Developers Console → Messaging API → Channel access token (long-lived) |
+| `LINE_USER_ID` | Your personal LINE UID — starts with `U`, 33 characters |
 
 For GitHub Actions, add the same three values under **Settings → Secrets and variables → Actions**.
 
-### 3. Run Locally
+### 3. Run locally
 
 ```bash
 python main.py
 ```
 
-### 4. Trigger Manually on GitHub
+### 4. Trigger manually on GitHub
 
 Go to **Actions → Daily BIM Bot → Run workflow**.
 
 ---
 
-## 🔧 Utilities
+## Configuration
+
+All tunable parameters are grouped at the top of [`main.py`](main.py):
+
+| Constant | Default | Description |
+| :--- | :---: | :--- |
+| `NEWS_FILTER_DAYS` | `7` | Only include articles published within this many days |
+| `REQUEST_TIMEOUT` | `15` | Timeout in seconds for Google News RSS requests |
+| `LINE_TIMEOUT` | `30` | Timeout in seconds for LINE API requests |
+| `LLM_TEMPERATURE` | `0.75` | Gemini creativity (0 = precise, 1 = creative) |
+| `CANDIDATE_MODELS` | see file | Gemini model priority list for automatic fallback |
+| `NEWS_TOPICS` | see file | Search queries and fetch limits per category |
+
+---
+
+## Utilities
 
 | Script | Purpose |
 | :--- | :--- |
 | `check_models.py` | List all Gemini models available for your API key |
 | `test_line.py` | Diagnose LINE token validity and push connectivity |
 
+> **Note:** `test_line.py` sends a real LINE message each time it runs and counts against your monthly quota (200 messages on the free plan). Run it only when diagnosing a connection issue.
+
 ---
 
-## 📋 Changelog
+## Known Limitations
 
-### v2.2.0 — 2026-04-30
-- Added dual-layer date filtering to prevent stale articles in the digest
-  - Layer 1: `when:7d` appended to all Google News RSS queries (filters at source)
-  - Layer 2: `pubDate` parsing on each RSS item — articles older than 7 days are skipped
-- `search_news()` now accepts a `days` parameter (default: 7) for easy tuning
-- Log output now shows filtered article count per topic (e.g. `取得 5 則（過濾掉 2 則舊文章）`)
+- **LINE free plan:** limited to 200 push messages per month. Each daily run uses 1 message (plus 1 if a failure alert fires).
+- **Gemini free tier:** subject to rate limits. The bot will automatically fall back to `gemini-flash-latest` if `gemini-2.0-flash` is exhausted.
+- **Google News RSS:** no official API contract — query syntax and result format may change without notice.
+- **Article links:** generated as Google `site:` search URLs rather than direct links, because Google News redirect URLs expire.
 
-### v2.1.0 — 2026-04-28
-- Reduced daily digest from 7 articles to 6 (BIM × AI: 3, BIM-MEP: 2, BIM General: 1)
-- Increased RSS fetch pool to give Gemini more candidates to choose from: BIM × AI (6), BIM-MEP (4), BIM General (3)
-- Simplified source line in digest: removed article title, now shows `📰 Source Name` only
-- Switched article links from long Google News redirect URLs to Google `site:` search URLs — shorter, always clickable in LINE, and reliably surface the correct article
-- Removed Markdown link formatting from output (LINE does not render Markdown; bare URLs auto-become clickable)
+---
 
-### v2.0.0 — 2026-04-28
-- **Breaking:** Replaced DuckDuckGo search with Google News RSS (fixes silent failures on GitHub Actions runners where DuckDuckGo IPs are blocked)
-- **Breaking:** News domain changed from international geopolitics/science to BIM industry coverage
-- Added weighted topic distribution: BIM × AI (5) > BIM-MEP (3) > BIM General (2)
-- Updated Gemini models: `gemini-1.5-pro-002` (deprecated) → `gemini-2.0-flash`; fallback updated to `gemini-flash-latest`
-- Rewrote LLM prompt: gyaru-style personality, personal commentary, no boilerplate AI tone
-- Raised generation temperature from 0.3 → 0.75 for more natural output
-- Removed unused `line-bot-sdk` and `duckduckgo-search` dependencies
-- Removed dead code and cleaned up unused imports
-- Added `test_line.py` diagnostic utility
-- Fixed `sys.stdout.reconfigure(encoding='utf-8')` for Windows compatibility
+## Changelog
 
-### v1.0.0 — 2024-xx-xx
-- Initial release: international news (geopolitics, economics, science) via DuckDuckGo
-- Gemini 1.5 Pro with Flash fallback
-- LINE push via LINE Bot SDK v3
+For the full version history, see [CHANGELOG.md](CHANGELOG.md).
+
+---
+
+## License
+
+This project is licensed under the MIT License — see [LICENSE](LICENSE) for details.

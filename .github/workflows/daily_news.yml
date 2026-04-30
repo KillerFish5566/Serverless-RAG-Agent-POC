@@ -1,41 +1,60 @@
-name: Daily News Bot 🌍
+name: Daily BIM Bot
 
-# 設定觸發條件
 on:
   schedule:
-    # GitHub 使用 UTC 時間。台灣是 UTC+8。
-    # 所以 UTC 22:30 = 台灣早上 06:30
+    # UTC 22:30 = 台灣早上 06:30（UTC+8）
     - cron: '30 22 * * *'
-  # 讓我們可以手動按按鈕測試
   workflow_dispatch:
+
+# 最小權限原則：只申請程式真正需要的權限
+permissions:
+  contents: read
 
 jobs:
   run-news-bot:
     runs-on: ubuntu-latest
+    timeout-minutes: 10  # 防止程式卡死無限等待
 
     steps:
-      # 1. 把你的程式碼抓下來
       - name: Checkout content
         uses: actions/checkout@v4
 
-      # 2. 設定 Python 環境 (使用穩定的 3.12)
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           cache: 'pip'
 
-      # 3. 安裝套件
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # 4. 執行程式 (把 Secrets 注入環境變數)
       - name: Run News Bot
+        id: run_bot
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
+        run: python main.py
+
+      # Bot 執行失敗時，透過 LINE 發送錯誤通知
+      - name: Notify failure via LINE
+        if: failure()
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
         run: |
-          python main.py
+          python - <<'EOF'
+          import os, requests, datetime
+          token   = os.environ["LINE_CHANNEL_ACCESS_TOKEN"]
+          user_id = os.environ["LINE_USER_ID"]
+          now     = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y/%m/%d %H:%M")
+          msg     = f"⚠️ BIM Bot 執行失敗 ({now})\n請至 GitHub Actions 查看詳細錯誤記錄。"
+          requests.post(
+              "https://api.line.me/v2/bot/message/push",
+              headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+              json={"to": user_id, "messages": [{"type": "text", "text": msg}]},
+              timeout=15,
+          )
+          EOF

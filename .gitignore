@@ -1,2 +1,42 @@
+# 環境變數（含 API 金鑰，絕對不能上傳）
 .env
+
+# Claude Code 工作目錄
 .claude/
+
+# Python 編譯快取
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+
+# 虛擬環境
+.venv/
+venv/
+env/
+ENV/
+
+# 套件建置產物
+dist/
+build/
+*.egg-info/
+*.egg
+
+# 測試與程式碼品質工具快取
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# IDE 設定
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db

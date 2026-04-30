@@ -1,0 +1,15 @@
+[project]
+name = "bim-daily-bot"
+version = "2.2.0"
+description = "Serverless BIM industry news digest bot — scrapes Google News RSS, summarizes with Gemini, delivers to LINE."
+authors = [{ name = "Sphinx" }]
+license = { text = "MIT" }
+requires-python = ">=3.12"
+dependencies = [
+    "google-genai>=1.0",
+    "requests>=2.31",
+    "python-dotenv>=1.0",
+]
+
+[project.urls]
+Repository = "https://github.com/KillerFish5566/Serverless-RAG-Agent-POC"

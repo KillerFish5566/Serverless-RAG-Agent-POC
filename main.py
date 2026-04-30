@@ -9,44 +9,67 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
-# --- 設定日誌系統 ---
-sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+# ---------------------------------------------------------------------------
+# 設定區（所有可調整的參數集中在這裡）
+# ---------------------------------------------------------------------------
+NEWS_FILTER_DAYS = 7          # 只收集最近幾天的新聞
+REQUEST_TIMEOUT  = 15         # Google News RSS 請求逾時（秒）
+LINE_TIMEOUT     = 30         # LINE API 請求逾時（秒）
+LLM_TEMPERATURE  = 0.75       # Gemini 回應創意度（0=嚴謹, 1=創意）
+LINE_API_PUSH    = "https://api.line.me/v2/bot/message/push"
+
+# Gemini 模型優先序（第一個失敗時自動換下一個）
+CANDIDATE_MODELS = ["gemini-2.0-flash", "gemini-flash-latest"]
+
+# (分類標籤, 搜尋關鍵字, 最多抓取則數)
+# 數量比最終顯示多，讓 Gemini 有更多素材可以挑選
+NEWS_TOPICS: list[tuple[str, str, int]] = [
+    (
+        "BIM x AI",
+        "BIM artificial intelligence OR BIM machine learning OR BIM AI automation OR generative AI BIM",
+        6,
+    ),
+    (
+        "BIM-MEP",
+        "BIM MEP coordination OR mechanical electrical plumbing BIM OR MEP clash detection BIM",
+        4,
+    ),
+    (
+        "BIM 總覽",
+        "Building Information Modeling OR BIM construction OR BIM architecture OR OpenBIM IFC",
+        3,
+    ),
+]
+
+# ---------------------------------------------------------------------------
+# 初始化
+# ---------------------------------------------------------------------------
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S',
-    handlers=[logging.StreamHandler(sys.stdout)]
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger(__name__)
 
-# --- 載入環境變數 ---
 load_dotenv()
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_API_KEY           = os.getenv("GEMINI_API_KEY")
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
-LINE_USER_ID = os.getenv("LINE_USER_ID")
+LINE_USER_ID             = os.getenv("LINE_USER_ID")
 
 if not all([GEMINI_API_KEY, LINE_CHANNEL_ACCESS_TOKEN, LINE_USER_ID]):
-    logger.error("❌ 環境變數缺失！請檢查 .env 檔案。")
+    logger.error("❌ 環境變數缺失！請檢查 .env 檔案（參考 .env.example）。")
     sys.exit(1)
 
-# --- 初始化 Google GenAI Client ---
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-def get_target_date():
-    return datetime.date.today()
+# ---------------------------------------------------------------------------
+# 工具函式
+# ---------------------------------------------------------------------------
 
-def make_search_url(title, source_domain):
-    """
-    用 site: 搜尋語法產生 Google 搜尋連結。
-    LINE 上可以直接點開，第一筆結果就是該文章。
-    """
-    domain_bare = source_domain.replace("https://", "").replace("http://", "").replace("www.", "").rstrip("/")
-    short_title = " ".join(title.split()[:6])
-    query = f"site:{domain_bare} {short_title}"
-    return f"https://www.google.com/search?q={urllib.parse.quote_plus(query)}"
-
-def parse_pub_date(pub_date_str):
-    """解析 RSS pubDate 字串，回傳 datetime.date，失敗時回傳 None。"""
+def parse_pub_date(pub_date_str: str) -> datetime.date | None:
+    """解析 RSS pubDate 字串，回傳 date，格式無法辨識時回傳 None。"""
     if not pub_date_str:
         return None
     for fmt in ("%a, %d %b %Y %H:%M:%S %z", "%a, %d %b %Y %H:%M:%S GMT"):
@@ -56,76 +79,86 @@ def parse_pub_date(pub_date_str):
             continue
     return None
 
-def search_news(days: int = 7):
+
+def make_search_url(title: str, source_domain: str) -> str:
+    """用 site: 語法產生 Google 搜尋連結，LINE 點開後第一筆就是該文章。"""
+    domain = (
+        source_domain
+        .replace("https://", "")
+        .replace("http://", "")
+        .replace("www.", "")
+        .rstrip("/")
+    )
+    short_title = " ".join(title.split()[:6])
+    query = f"site:{domain} {short_title}"
+    return f"https://www.google.com/search?q={urllib.parse.quote_plus(query)}"
+
+
+# ---------------------------------------------------------------------------
+# 核心功能
+# ---------------------------------------------------------------------------
+
+def search_news(days: int = NEWS_FILTER_DAYS) -> list[str]:
     """
-    透過 Google News RSS 搜尋 BIM 相關新聞（不受 GitHub Actions IP 封鎖）
-    雙重日期過濾：查詢參數 when:{days}d + pubDate 二次驗證
-    權重：BIM-AI(6則) > BIM-MEP(4則) > BIM總覽(3則)
+    透過 Google News RSS 搜尋 BIM 相關新聞。
+    雙重日期過濾：查詢參數 when:{days}d（源頭過濾）+ pubDate 解析（二次驗證）。
     """
     logger.info(f"🔍 開始搜尋 BIM 相關新聞（近 {days} 天）...")
-
     cutoff = datetime.date.today() - datetime.timedelta(days=days)
+    results: list[str] = []
 
-    topics = [
-        ("BIM x AI",  "BIM artificial intelligence OR BIM machine learning OR BIM AI automation OR generative AI BIM",  6),
-        ("BIM-MEP",   "BIM MEP coordination OR mechanical electrical plumbing BIM OR MEP clash detection BIM",          4),
-        ("BIM 總覽",  "Building Information Modeling OR BIM construction OR BIM architecture OR OpenBIM IFC",           3),
-    ]
-
-    results = []
-
-    for label, query, max_count in topics:
-        # 第一道防線：when:Xd 在 RSS 源頭過濾
+    for label, query, max_count in NEWS_TOPICS:
         dated_query = f"{query} when:{days}d"
-        rss_url = f"https://news.google.com/rss/search?q={requests.utils.quote(dated_query)}&hl=en-US&gl=US&ceid=US:en"
+        rss_url = (
+            f"https://news.google.com/rss/search"
+            f"?q={requests.utils.quote(dated_query)}&hl=en-US&gl=US&ceid=US:en"
+        )
         try:
-            resp = requests.get(rss_url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+            resp = requests.get(
+                rss_url, timeout=REQUEST_TIMEOUT, headers={"User-Agent": "Mozilla/5.0"}
+            )
             resp.raise_for_status()
-            root = ET.fromstring(resp.content)
+            root  = ET.fromstring(resp.content)
             items = root.findall(".//item")
-            count = 0
-            skipped = 0
+            count = skipped = 0
+
             for item in items:
                 if count >= max_count:
                     break
-                title = item.findtext("title", "").strip()
+                title       = item.findtext("title", "").strip()
                 description = item.findtext("description", "").strip()
-                pub_date_str = item.findtext("pubDate", "").strip()
-                source_el = item.find("source")
-                source_url = source_el.attrib.get("url", "").strip() if source_el is not None else ""
+                pub_date    = parse_pub_date(item.findtext("pubDate", ""))
+                source_el   = item.find("source")
+                source_url  = source_el.attrib.get("url", "").strip() if source_el is not None else ""
                 source_name = source_el.text.strip() if source_el is not None and source_el.text else ""
 
                 if not title or not source_name:
                     continue
-
-                # 第二道防線：解析 pubDate，過濾超過 days 天的文章
-                pub_date = parse_pub_date(pub_date_str)
                 if pub_date and pub_date < cutoff:
                     skipped += 1
                     logger.debug(f"   [{label}] 跳過舊文章 ({pub_date}): {title[:40]}")
                     continue
 
-                article_url = make_search_url(title, source_url)
                 results.append(
                     f"類別: {label}\n"
                     f"標題: {title}\n"
                     f"摘要: {description}\n"
                     f"來源: {source_name}\n"
-                    f"文章連結: {article_url}"
+                    f"文章連結: {make_search_url(title, source_url)}"
                 )
                 count += 1
 
             logger.info(f"   [{label}] 取得 {count} 則（過濾掉 {skipped} 則舊文章）")
+
         except Exception as e:
             logger.warning(f"   [{label}] 搜尋失敗: {e}")
 
     logger.info(f"✅ 搜尋完成，共 {len(results)} 則。")
     return results
 
-def generate_summary(news_list, target_date):
-    """
-    使用 Gemini 生成專業報告 (包含自動降級機制)
-    """
+
+def generate_summary(news_list: list[str], target_date: datetime.date) -> str | None:
+    """使用 Gemini 生成 LINE 日報，附自動模型降級機制。"""
     if not news_list:
         return None
 
@@ -165,78 +198,68 @@ def generate_summary(news_list, target_date):
         "原始新聞資料：\n" + "\n---\n".join(news_list)
     )
 
-    candidate_models = ['gemini-2.0-flash', 'gemini-flash-latest']
-
-    for model_name in candidate_models:
+    for model_name in CANDIDATE_MODELS:
         try:
             logger.info(f"🧪 嘗試使用模型: {model_name} 進行撰寫...")
-            
             response = client.models.generate_content(
-                model=model_name, 
+                model=model_name,
                 contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.75
-                )
+                config=types.GenerateContentConfig(temperature=LLM_TEMPERATURE),
             )
             logger.info(f"✨ 成功使用 {model_name} 完成報告！")
             return response.text
-            
         except Exception as e:
-            logger.warning(f"⚠️ 模型 {model_name} 執行失敗 (可能是額度不足或不支援): {e}")
+            logger.warning(f"⚠️ 模型 {model_name} 執行失敗: {e}")
             logger.info("🔄 正在切換至下一個備援模型...")
-            continue # 繼續迴圈，試下一個模型
 
     logger.error("❌ 所有模型皆嘗試失敗，無法生成報告。")
     return None
 
-def send_line_push(message):
+
+def send_line_push(message: str) -> bool:
+    """推播訊息至 LINE，成功回傳 True，失敗回傳 False。"""
     logger.info("🚀 正在發送 LINE 訊息...")
-
     headers = {
-        'Content-Type': 'application/json',
-        'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}'
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}",
     }
-
     payload = {
-        'to': LINE_USER_ID,
-        'messages': [{'type': 'text', 'text': message}]
+        "to": LINE_USER_ID,
+        "messages": [{"type": "text", "text": message}],
     }
-
-    target_url = 'https://api.line.me/v2/bot/message/push'
-
     try:
-        # 設定 30 秒逾時
-        logger.info(f"📡 正在連線至: {target_url}")
-        resp = requests.post(
-            target_url,
-            headers=headers,
-            json=payload,
-            timeout=30
-        )
-
+        resp = requests.post(LINE_API_PUSH, headers=headers, json=payload, timeout=LINE_TIMEOUT)
         if resp.status_code == 200:
             logger.info("✅ LINE 訊息發送成功！")
+            return True
         else:
             logger.error(f"❌ LINE 發送失敗: {resp.status_code} - {resp.text}")
-
+            return False
     except Exception as e:
         logger.error(f"❌ LINE 發送發生錯誤: {e}")
+        return False
 
-def main():
-    today = get_target_date()
-    news = search_news()
+
+# ---------------------------------------------------------------------------
+# 主程式進入點
+# ---------------------------------------------------------------------------
+
+def main() -> None:
+    today = datetime.date.today()
+    news  = search_news()
 
     if not news:
         logger.warning("📭 今天沒有足夠的新聞，跳過。")
         return
 
     summary = generate_summary(news, today)
-    
     if summary:
-        print("\n" + "="*30)
+        print("\n" + "=" * 30)
         print(summary)
-        print("="*30 + "\n")
-        send_line_push(summary)
+        print("=" * 30 + "\n")
+        success = send_line_push(summary)
+        if not success:
+            sys.exit(1)
 
 
 if __name__ == "__main__":
